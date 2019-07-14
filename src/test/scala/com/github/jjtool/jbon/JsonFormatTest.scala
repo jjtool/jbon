@@ -17,13 +17,14 @@ class JsonFormatTest extends FlatSpec with Matchers {
     writeAndRead(Array(1,2,3), ArrayFormat(intFormat))
   }
 
-  case class ClassA(i: Int, s: String)
-  case class ClassB(d: Double, as: Seq[ClassA])
+  private case class ClassA(i: Int, s: String)
+  private case class ClassB(d: Double, as: Seq[ClassA])
+
+  private val a1 = ClassA(1, "1")
+  private val a2 = ClassA(2, "2")
+  private val b = ClassB(123.456, Array(a1, a2))
 
   it should "convert case classes to json and back" in {
-    val a1 = ClassA(1, "1")
-    val a2 = ClassA(2, "2")
-    val b = ClassB(123.456, Array(a1, a2))
 
     val formatA = Object2Format[ClassA, Int, String](
       "i", _.i, intFormat,
