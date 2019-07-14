@@ -4,6 +4,7 @@ import java.io.IOException
 
 import com.eclipsesource.json.{Json, JsonObject, JsonValue}
 
+import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
 trait JsonFormat[A]{
@@ -39,7 +40,32 @@ object JsonFormat {
     override def write(a: String): JsonValue = Json.value(a)
   }
 
-  case class ArrayFormat[A](implicit aFormat: JsonFormat[A]) extends JsonFormat[Array[A]] {
+  case class SeqFormat[A](aFormat: JsonFormat[A]) extends JsonFormat[Seq[A]] {
+
+    override def read(json: JsonValue): Try[Seq[A]] = {
+      val jsonArray = json.asArray()
+      val itemNumber = jsonArray.size()
+      var seq = Vector[A]()
+      var i = 0
+      while(i < itemNumber){
+        val item = jsonArray.get(i)
+        aFormat.read(item) match {
+          case Success(a) => seq :+= a
+          case Failure(t) => return Failure(ReadFailure(s"item $i", t))
+        }
+        i += 1
+      }
+      Success(seq)
+    }
+
+    override def write(as: Seq[A]): JsonValue = {
+      val array = Json.array()
+      as.foreach(a => array.add(aFormat.write(a)))
+      array
+    }
+  }
+
+  case class ArrayFormat[A](aFormat: JsonFormat[A])(implicit tag: ClassTag[A]) extends JsonFormat[Array[A]] {
 
     override def read(json: JsonValue): Try[Array[A]] = {
       val jsonArray = json.asArray()
@@ -109,8 +135,33 @@ object JsonFormat {
     }
   }
 
-  // TODO: tests
-  // TODO: test failure msg
+  case class Field[O,F](name: String, get: O => F, format: JsonFormat[F])
+
+  case class Object1[O, F1](build: (F1) => O)(field1: Field[O,F1]) extends JsonFormat[O] {
+    override def read(json: JsonValue): Try[O] = for {
+      obj <- getObject(json)
+      f1 <- field1.format.read(obj.get(field1.name)) >> (t => ReadFailure(field1.name, t))
+    } yield build(f1)
+
+    override def write(o: O): JsonValue = {
+      val obj = Json.`object`()
+      obj.add(field1.name, field1.format.write(field1.get(o)))
+    }
+  }
+
+  case class Object2[O, F1, F2](build: (F1, F2) => O)(field1: Field[O,F1], field2: Field[O,F2]) extends JsonFormat[O] {
+    override def read(json: JsonValue): Try[O] = for {
+      obj <- getObject(json)
+      f1 <- field1.format.read(obj.get(field1.name)) >> (t => ReadFailure(field1.name, t))
+      f2 <- field2.format.read(obj.get(field2.name)) >> (t => ReadFailure(field2.name, t))
+    } yield build(f1, f2)
+
+    override def write(o: O): JsonValue = {
+      Json.`object`()
+        .add(field1.name, field1.format.write(field1.get(o)))
+        .add(field2.name, field2.format.write(field2.get(o)))
+    }
+  }
 
   private def getObject(json: JsonValue): Try[JsonObject] = Try(json.asObject()) match {
     case s: Success[JsonObject] => s
